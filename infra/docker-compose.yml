@@ -6,8 +6,7 @@ services:
       POSTGRES_USER: freela
       POSTGRES_PASSWORD: freela
       POSTGRES_DB: postgres
-    ports:
-      - "5432:5432"
+    ports: [ "5432:5432" ]
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init-databases.sql:/docker-entrypoint-initdb.d/01-init-databases.sql:ro
@@ -16,14 +15,13 @@ services:
       interval: 5s
       timeout: 5s
       retries: 15
-    networks: [freela-net]
+    networks: [ freela-net ]
 
   kafka:
     image: apache/kafka:4.2.1
     container_name: freela-kafka
     hostname: kafka
-    ports:
-      - "9092:9092"
+    ports: [ "9092:9092" ]
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -43,7 +41,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 15
-    networks: [freela-net]
+    networks: [ freela-net ]
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
@@ -51,12 +49,46 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
-    ports:
-      - "8090:8080"
+    ports: [ "8090:8080" ]
     environment:
       KAFKA_CLUSTERS_0_NAME: freela-local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:19092
-    networks: [freela-net]
+    networks: [ freela-net ]
+  zipkin:
+    image: openzipkin/zipkin
+    container_name: zipkin
+    ports: [ "9411:9411" ]
+    networks: [ freela-net ]
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.17.0
+    container_name: logstash
+    environment:
+      - LS_JAVA_OPTS=-Xms256m -Xmx256m
+    volumes:
+      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
+      - ../../logs:/logs:ro
+    depends_on:
+      - elasticsearch
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.17.0
+    container_name: kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
 
 volumes:
   postgres_data:
