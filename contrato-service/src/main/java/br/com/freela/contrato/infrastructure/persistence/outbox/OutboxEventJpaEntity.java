@@ -36,12 +36,16 @@ public class OutboxEventJpaEntity {
 
     private String correlationId;
 
+    @Column(columnDefinition = "text")
+    private String traceContext;
+
     public OutboxEventJpaEntity(UUID eventId, UUID aggregateId, String eventType,
-                                String correlationId, String payload) {
+                                String correlationId, String traceContext, String payload) {
         this.eventId = eventId;
         this.aggregateId = aggregateId;
         this.eventType = eventType;
         this.correlationId = correlationId;
+        this.traceContext = traceContext;
         this.payload = payload;
         this.criadoEm = Instant.now();
     }

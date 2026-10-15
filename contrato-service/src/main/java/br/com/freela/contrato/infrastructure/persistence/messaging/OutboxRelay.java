@@ -11,6 +11,12 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
+import java.util.Map;
 
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
@@ -22,6 +28,9 @@ public class OutboxRelay {
 
     private final OutboxEventJpaRepository outbox;
     private final KafkaTemplate<String, String> kafka;
+    private final Tracer tracer;
+    private final Propagator propagator;
+    private final ObjectMapper objectMapper;
 
     @Scheduled(fixedDelay = 500)
     @Transactional
@@ -32,7 +41,9 @@ public class OutboxRelay {
             }
             MDC.put("eventId", evento.getEventId().toString());
             MDC.put("contratoId", evento.getAggregateId().toString());
-            try {
+
+            Span span = abrirSpan(evento);
+            try (Tracer.SpanInScope ws = tracer.withSpan(span)) {
                 var record = new ProducerRecord<String, String>(
                         KafkaConfig.TOPICO_CONTRATO_EVENTOS,
                         evento.getAggregateId().toString(),
@@ -45,13 +56,29 @@ public class OutboxRelay {
                 evento.marcarComoPublicado();
                 log.info("contrato.outbox.publicado eventType={}", evento.getEventType());
             } catch (Exception e) {
+                span.error(e);
                 log.error("contrato.outbox.falha eventType={} motivo={}", evento.getEventType(), e.toString());
                 break;
             } finally {
+                span.end();
                 MDC.remove("correlationId");
                 MDC.remove("eventId");
                 MDC.remove("contratoId");
             }
         }
+    }
+
+    private Span abrirSpan(OutboxEventJpaEntity evento) {
+        String nome = "outbox.publicar " + evento.getEventType();
+        if (evento.getTraceContext() != null) {
+            try {
+                Map<String, String> carrier = objectMapper.readValue(
+                        evento.getTraceContext(), new TypeReference<Map<String, String>>() {});
+                return propagator.extract(carrier, Map::get).name(nome).start();
+            } catch (Exception e) {
+                log.warn("contrato.outbox.trace_context_invalido motivo={}", e.toString());
+            }
+        }
+        return tracer.nextSpan().name(nome).start();
     }
 }
